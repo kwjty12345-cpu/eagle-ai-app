@@ -11,7 +11,8 @@ function App() {
 
   const fetchNews = async () => {
     try {
-      const response = await fetch('https://eagle-ai-app-production.up.railway.app/api/news');
+      // 把这一行换成你截图里的那个网址 (注意后面要有 /api/news)
+const response = await fetch('https://eagle-ai-app-production.up.railway.app/api/news');
       const rawData = await response.json();
       setAllNews(rawData);
     } catch (error) {
