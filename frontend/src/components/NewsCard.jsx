@@ -41,7 +41,7 @@ const NewsCard = ({ eventGroup, isVIP, onUnlockRequest }) => {
       // 2. 关键：发送给 AI 的是整个 eventGroup (包含主数据和隐藏数据)
       const payload = JSON.stringify(eventGroup);
       
-      const url = `https://eagle-ai-app.onrender.com/api/predict?data=${encodeURIComponent(payload)}`;
+      const url = `https://eagle-ai-app-production.up.railway.app/api/predict?data=${encodeURIComponent(payload)}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`API Error: ${res.status}`);
       const result = await res.json();

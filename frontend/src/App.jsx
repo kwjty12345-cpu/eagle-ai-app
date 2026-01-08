@@ -11,7 +11,7 @@ function App() {
 
   const fetchNews = async () => {
     try {
-      const response = await fetch('https://eagle-ai-app.onrender.com/api/news');
+      const response = await fetch('https://eagle-ai-app-production.up.railway.app/api/news');
       const rawData = await response.json();
       setAllNews(rawData);
     } catch (error) {
