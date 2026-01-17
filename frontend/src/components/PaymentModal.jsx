@@ -4,7 +4,7 @@ import { auth } from '../firebase';
 // 自动判断是本地开发还是线上环境
 const API_BASE = import.meta.env.MODE === "development"
   ? "http://localhost:5000"
-  : "eagle-ai-app-production.up.railway.app"; // 你的 Railway 真实地址
+  : "https://eagle-ai-app-production.up.railway.app"; // 你的 Railway 真实地址
 
 const PaymentModal = ({ onClose, onUpgrade }) => {
   const [loading, setLoading] = useState(false);

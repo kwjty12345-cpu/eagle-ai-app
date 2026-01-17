@@ -14,7 +14,7 @@ import DisclaimerModal from './components/DisclaimerModal';
 // const API_BASE = "http://localhost:5000";
 
 // 🔴 模式 B: 生产环境
-const API_BASE = "eagle-ai-app-production.up.railway.app";
+const API_BASE = "https://eagle-ai-app-production.up.railway.app";
 
 function App() {
   // 👇 3. 添加用户登录状态管理
