@@ -19,7 +19,7 @@ const app = express();
 // 如果只用 app.use(cors())，上线后可能会遇到 Cookie/Token 验证失败的问题
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://eagle-ai-frontend.vercel.app" // 你的线上前端地址
+  "https://eagle-ai-app.vercel.app" // 你的线上前端地址
 ];
 
 app.use(cors({
