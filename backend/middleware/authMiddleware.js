@@ -1,52 +1,47 @@
-// backend/middleware/authMiddleware.js
-const admin = require('../config/firebase'); // 引入我们刚才初始化的 firebase
-const User = require('../models/User');
+const { auth } = require('../config/firebase');
 
-const protect = async (req, res, next) => {
-  let token;
-
-  // 1. 获取 Token
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
-    token = req.headers.authorization.split(' ')[1];
-  }
-
-  if (!token) {
-    return res.status(401).json({ message: '未授权，没有 Token' });
-  }
-
+const authMiddleware = async (req, res, next) => {
   try {
-    // 2. 🔥 让 Firebase 验证 Token 真伪
-    const decodedToken = await admin.auth().verifyIdToken(token);
+    const authHeader = req.headers.authorization;
     
-    // decodedToken.uid 就是这个用户在 Firebase 里的唯一 ID
-    const firebaseUid = decodedToken.uid;
-    const email = decodedToken.email;
-
-    // 3. 去 MongoDB 找这个用户
-    // 逻辑：如果 MongoDB 里没有这个用户（比如他刚在前端用 Google 登录），
-    // 我们就在这里自动帮他在 MongoDB 建个档。这叫 "Sync" (同步)。
-    
-    let user = await User.findOne({ firebaseUid });
-
-    if (!user) {
-        // 如果是新用户，自动创建
-        user = await User.create({
-            firebaseUid,
-            email
-        });
+    // 1. 检查有没有 Header
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log("❌ [Auth] 缺少 Authorization Header");
+      return res.status(401).json({ error: 'No token provided' });
     }
 
-    // 4. 把用户信息挂载到 req 上
-    req.user = user;
+    const token = authHeader.split(' ')[1];
+    
+    // 2. 打印 Token 前几位，确认收到了东西 (不要打印全部，不安全)
+    console.log(`🔍 [Auth] 收到 Token: ${token.substring(0, 10)}...`);
+    
+    // 3. 尝试验证
+    const decodedToken = await auth.verifyIdToken(token);
+    
+    console.log("✅ [Auth] Token 验证成功! UID:", decodedToken.uid);
+    req.user = decodedToken;
     next();
-
+    
   } catch (error) {
-    console.error('Firebase Auth Error:', error);
-    res.status(401).json({ message: 'Token 无效或已过期' });
+    // 🔥🔥🔥 关键：打印详细的 Firebase 错误信息 🔥🔥🔥
+    console.error("❌ [Auth] 验证失败详情:", JSON.stringify(error, null, 2));
+    console.error("❌ [Auth] 错误代码 (Code):", error.code);
+    console.error("❌ [Auth] 错误信息 (Message):", error.message);
+
+    // 根据具体错误返回不同提示
+    if (error.code === 'auth/argument-error') {
+       return res.status(401).json({ error: 'Token 格式错误 (Argument Error)' });
+    }
+    if (error.code === 'auth/id-token-expired') {
+       return res.status(401).json({ error: 'Token 已过期 (Expired)' });
+    }
+    if (error.code === 'auth/invalid-credential') {
+        // 这是最常见的情况：密钥不对
+       return res.status(401).json({ error: '服务端密钥配置错误 (Invalid Credential)' });
+    }
+
+    res.status(401).json({ error: 'Authentication failed', details: error.message });
   }
 };
 
-module.exports = { protect };
+module.exports = authMiddleware;
