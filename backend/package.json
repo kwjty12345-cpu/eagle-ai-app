@@ -14,10 +14,13 @@
     "dotenv": "^16.6.1",
     "express": "^4.18.2",
     "groq-sdk": "^0.37.0",
-    "mongoose": "^7.5.0",
+    "mongoose": "^7.8.8",
     "node-cron": "^3.0.3",
     "openai": "^6.15.0",
-    "puppeteer": "^21.3.0"
+    "puppeteer": "^21.11.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "stripe": "^20.1.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

@@ -6,11 +6,11 @@ const scrapeForexFactory = require('../services/scraper');
 // @access  Public
 const getNews = async (req, res) => {
   try {
-    // 按时间正序排列
-    const news = await NewsEvent.find({}).sort({ date: 1 });
+    // 还原：不使用 limit 参数，直接查询 (如果数据库只有 10 条，就返回 10 条)
+    const news = await NewsEvent.find().sort({ date: -1 }); 
     res.json(news);
   } catch (error) {
-    res.status(500).json({ message: 'Server Error' });
+    res.status(500).json({ message: error.message });
   }
 };
 

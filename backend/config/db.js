@@ -1,15 +1,15 @@
+// config/db.js
 const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGO_URI, {
-      // 现代 Mongoose 不需要额外的 deprecated options，保持简洁
-    });
+    // 读取 .env 里的连接地址
+    const conn = await mongoose.connect(process.env.MONGO_URI);
 
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
+    console.log(`MongoDB 连接成功: ${conn.connection.host}`);
   } catch (error) {
     console.error(`Error: ${error.message}`);
-    process.exit(1);
+    process.exit(1); // 连不上就退出程序
   }
 };
 
