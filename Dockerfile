@@ -5,6 +5,8 @@ FROM ghcr.io/puppeteer/puppeteer:21.5.2
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
+ENV TZ=Asia/Kuala_Lumpur
+
 WORKDIR /usr/src/app
 
 # 切换到 root 用户来安装依赖 (因为 puppeteer 镜像默认是 pptruser)

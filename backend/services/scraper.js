@@ -6,51 +6,51 @@ const NewsEvent = require('../models/NewsEvent');
 puppeteer.use(StealthPlugin());
 
 const scrapeForexFactory = async () => {
-  console.log('🕷️ 启动 V5.0 稳定版 (修复 Timeout + 自动滚动检测 + 时区修正)...');
+  console.log('🕷️ 启动 V5.0 稳定版 (仅修复时差，保留Filter)...');
 
   // 1. 数据库连接
   if (mongoose.connection.readyState === 0) {
       console.log('⚠️ 建立临时数据库连接...');
-      await mongoose.connect('mongodb://localhost:27017/forex_data');
+      await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/forex_data');
   }
 
   let browser;
   try {
     // ============================================================
-    // 1. 启动浏览器 (配置修正版)
+    // 1. 启动浏览器
     // ============================================================
     browser = await puppeteer.launch({
-      headless: true, // 或者是 "new"
+      headless: "new",
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--timezone=Asia/Kuala_Lumpur' // 👈 告诉浏览器引擎我们在吉隆坡
+        '--timezone=Asia/Kuala_Lumpur'
       ],
       env: {
         ...process.env,
-        TZ: 'Asia/Kuala_Lumpur' // 👈 告诉 Node 环境我们在吉隆坡
+        TZ: 'Asia/Kuala_Lumpur'
       }
-    }); // <--- 注意：这里必须把 launch 的括号闭合
+    });
 
     // ============================================================
-    // 2. 创建页面并应用时区
+    // 2. 创建页面
     // ============================================================
     const page = await browser.newPage();
     
-    // 👈 双重保险：强制页面逻辑使用吉隆坡时间
+    // 强制页面使用吉隆坡时间
     await page.emulateTimezone('Asia/Kuala_Lumpur');
 
-    // 开启控制台日志桥接
+    // 开启日志
     page.on('console', msg => {
         const text = msg.text();
         if (text.startsWith('DEBUG:')) console.log(text);
     });
 
-    // 3. 注入 Filter Cookie (只看 USD + High)
+    // 3. 注入 Filter Cookie (完全保留你原本的设置)
     const filterConfig = encodeURIComponent(JSON.stringify({
       impacts: ["3"], // High Impact
       currencies: ["USD"], // USD Only
-      events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+      events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] // 👈 保留了你的事件ID过滤
     }));
     
     await page.setCookie({
@@ -73,7 +73,7 @@ const scrapeForexFactory = async () => {
       // ============================================================
       // 🖱️ 动作：自动滚动页面
       // ============================================================
-      console.log('🖱️ 正在自动滚动页面，确保所有数据加载...');
+      console.log('🖱️ 正在自动滚动页面...');
       await page.evaluate(async () => {
           await new Promise((resolve) => {
               let totalHeight = 0;
@@ -93,7 +93,7 @@ const scrapeForexFactory = async () => {
       await new Promise(r => setTimeout(r, 1000));
 
       // ============================================================
-      // 🕵️ 开始抓取逻辑
+      // 🕵️ 抓取逻辑
       // ============================================================
       const rawEvents = await page.evaluate(() => {
         const data = [];
@@ -112,21 +112,17 @@ const scrapeForexFactory = async () => {
           let rawCurrency = getText('.calendar__currency');
           const title = getText('.calendar__event-title');
 
-          // 记忆逻辑
           if (rawDate && rawDate.length > 1) memDate = rawDate;
           if (rawTime && rawTime.length > 1) memTime = rawTime;
 
           if (!title) return; 
 
-          // 1. 获取图标 Class (判断颜色)
           const impactEl = row.querySelector('.calendar__impact .icon');
           const iconClass = impactEl ? impactEl.className : "";
           const isRed = iconClass.includes('impact-red') || iconClass.includes('high') || iconClass.includes('impact-3');
 
-          // 2. 诊断日志
           if (rawCurrency === 'USD') {
               if (isRed) {
-                  console.log(`DEBUG: [Row ${index}] ✅ 捕获: ${title} (${memDate} ${memTime})`);
                   data.push({
                       title, currency: 'USD', impact: 'High', 
                       rawDate: memDate, rawTime: memTime, 
@@ -136,9 +132,7 @@ const scrapeForexFactory = async () => {
                   });
               }
           } 
-          // 3. 处理堆叠事件
           else if (rawCurrency === '' && isRed) {
-              console.log(`DEBUG: [Row ${index}] ✅ 捕获(堆叠): ${title}`);
               data.push({
                   title, currency: 'USD', impact: 'High', 
                   rawDate: memDate, rawTime: memTime, 
@@ -153,7 +147,9 @@ const scrapeForexFactory = async () => {
 
       console.log(`📊 [${week}] 抓取结果: ${rawEvents.length} 条`);
 
-      // 入库
+      // ============================================================
+      // 💾 入库逻辑 (🔥 重点修改了这里 🔥)
+      // ============================================================
       let savedCount = 0;
       for (const event of rawEvents) {
         if (!event.rawTime || event.rawTime.toLowerCase().includes('day')) continue;
@@ -162,12 +158,19 @@ const scrapeForexFactory = async () => {
         const currentMonth = new Date().getMonth();
         let year = currentYear;
         
-        // 跨年逻辑处理
         if (event.rawDate.includes('Dec') && currentMonth === 0) year = currentYear - 1;
         else if (event.rawDate.includes('Jan') && currentMonth === 11) year = currentYear + 1;
 
-        let dateStr = `${event.rawDate} ${year} ${event.rawTime}`.replace(/\s+/g, ' ').trim().replace(/(\d)(am|pm)/i, '$1 $2');
+        // 🔥🔥🔥 核心修改开始 🔥🔥🔥
+        // 1. 把 9:30pm 变成 9:30 pm (加空格)
+        let timeStr = event.rawTime.replace(/(\d)(am|pm)/i, '$1 $2');
+        
+        // 2. 强制加上 "+0800"
+        // 这样 Node.js 就会知道 "这个 9:30pm 是马来西亚时间"，而不是 UTC
+        let dateStr = `${event.rawDate} ${year} ${timeStr} +0800`;
+        
         const dateObj = new Date(dateStr);
+        // 🔥🔥🔥 核心修改结束 🔥🔥🔥
 
         if (!isNaN(dateObj.getTime())) {
            await NewsEvent.findOneAndUpdate(
