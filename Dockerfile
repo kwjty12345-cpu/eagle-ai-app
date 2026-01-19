@@ -26,4 +26,4 @@ RUN chown -R pptruser:pptruser /usr/src/app
 USER pptruser
 
 # 启动命令
-CMD [ "node", "index.js" ]
+CMD [ "node", "server.js" ]
