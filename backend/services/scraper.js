@@ -6,7 +6,7 @@ const NewsEvent = require('../models/NewsEvent');
 puppeteer.use(StealthPlugin());
 
 const scrapeForexFactory = async () => {
-  console.log('🕷️ 启动 V5.3 最终修正版 (抓取 USD + All + 修复 Railway 时差)...');
+  console.log('🕷️ 启动 V5.4 最终版 (修复全天事件漏抓 + 时差修正)...');
 
   // 1. 数据库连接
   if (mongoose.connection.readyState === 0) {
@@ -16,7 +16,7 @@ const scrapeForexFactory = async () => {
 
   let browser;
   try {
-    // 启动浏览器 (无需 emulateTimezone args，因为 Railway IP 本身就是美国)
+    // 启动浏览器
     browser = await puppeteer.launch({
       headless: "new",
       args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -30,15 +30,12 @@ const scrapeForexFactory = async () => {
         if (text.startsWith('DEBUG:')) console.log(text);
     });
 
-    // ============================================================
-    // 3. 注入 Filter Cookie (关键修改!)
-    // ============================================================
-    // 解释：为了不漏掉 "WEF" (All 货币)，我们不能在 Cookie 里写 currencies: ["USD"]。
-    // 我们让网站返回所有货币，然后在下面的 JS 代码里精准筛选。
+    // 3. 注入 Filter Cookie
+    // 技巧：不限制货币，让网站返回所有，我们在 JS 里自己挑
     const filterConfig = encodeURIComponent(JSON.stringify({
-      impacts: ["3"], // High Impact (红色)
-      events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] // 保留你的事件ID过滤
-      // currencies: [] 👈 故意删掉这行，让它返回 USD, EUR, All 等所有数据
+      impacts: ["3"], // High Impact
+      events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"]
+      // currencies: [] // 空着代表所有货币
     }));
     
     await page.setCookie({
@@ -49,8 +46,7 @@ const scrapeForexFactory = async () => {
       expires: Math.floor(Date.now() / 1000) + 31536000
     });
 
-    // ✅ 修改：为了持续使用，抓取 "本周" 和 "下周" (预测未来需要下周数据)
-    // 如果你需要历史数据训练 AI，可以加上 'last' -> ['last', 'this', 'next']
+    // 抓取本周和下周
     const weeks = ['this', 'next'];
 
     for (const week of weeks) {
@@ -79,9 +75,6 @@ const scrapeForexFactory = async () => {
       
       await new Promise(r => setTimeout(r, 1000));
 
-      // ============================================================
-      // 🕵️ 抓取与筛选
-      // ============================================================
       const rawEvents = await page.evaluate(() => {
         const data = [];
         const rows = document.querySelectorAll('tr.calendar__row'); 
@@ -91,7 +84,7 @@ const scrapeForexFactory = async () => {
         
         console.log(`DEBUG: 页面总行数: ${rows.length}`); 
 
-        rows.forEach((row, index) => {
+        rows.forEach((row) => {
           const getText = (s) => { const el = row.querySelector(s); return el ? el.textContent.trim() : ""; };
           
           let rawDate = getText('.calendar__date');
@@ -105,25 +98,22 @@ const scrapeForexFactory = async () => {
           if (!title) return; 
 
           const impactEl = row.querySelector('.calendar__impact .icon');
-          const iconClass = impactEl ? impactEl.className : "";
-          const isRed = iconClass.includes('impact-red') || iconClass.includes('high') || iconClass.includes('impact-3');
+          const isRed = impactEl && (impactEl.className.includes('impact-red') || impactEl.className.includes('high') || impactEl.className.includes('impact-3'));
 
-          // ✅ 这里的逻辑实现了你的 Filter 需求：
-          // 虽然 Cookie 拿回了所有货币，但我们只把 USD 和 All 存进数组
+          // 筛选逻辑：红色 + (USD 或 All 或 空货币堆叠)
           const isTargetCurrency = (rawCurrency === 'USD' || rawCurrency === 'All');
           
           if (isRed) {
               if (isTargetCurrency) {
                   data.push({
                       title, currency: rawCurrency, impact: 'High', 
-                      rawDate: memDate, rawTime: memTime, 
+                      rawDate: memDate, rawTime: memTime, // 注意：这里的 memTime 可能是 "Day 3"
                       forecast: getText('.calendar__forecast'), 
                       actual: getText('.calendar__actual'), 
                       previous: getText('.calendar__previous')
                   });
               }
-              // 处理堆叠事件 (例如 9:30pm 有两个 USD 事件，第二个通常没有货币符号)
-              else if (rawCurrency === '') {
+              else if (rawCurrency === '') { // 堆叠事件
                   data.push({
                       title, currency: 'USD', impact: 'High', 
                       rawDate: memDate, rawTime: memTime, 
@@ -141,29 +131,34 @@ const scrapeForexFactory = async () => {
 
       let savedCount = 0;
       for (const event of rawEvents) {
-        if (!event.rawTime || event.rawTime.toLowerCase().includes('day')) continue;
+        // 🔥 关键修改 1: 删除了 skip "day" 的代码
+        if (!event.rawTime) continue; 
 
         const currentYear = new Date().getFullYear();
         const currentMonth = new Date().getMonth();
         let year = currentYear;
         
-        // 跨年处理
         if (event.rawDate.includes('Dec') && currentMonth === 0) year = currentYear - 1;
         else if (event.rawDate.includes('Jan') && currentMonth === 11) year = currentYear + 1;
 
-        let timeStr = event.rawTime.replace(/(\d)(am|pm)/i, '$1 $2');
+        let timeStr = "";
         
-        // 🔥🔥🔥 核心修复 🔥🔥🔥
-        // 1. 爬虫在 Railway (美国) 看到的 "5:30am" 是美国时间。
-        // 2. 我们把它标记为 "-0800" (美国西海岸时区)。
-        // 3. 数据库会把它存为标准 UTC 时间。
-        // 4. 当你的前端 (在马来西亚) 读取时，它会自动 +8 小时，变回正确的 21:30 (9:30 PM)。
+        // 🔥 关键修改 2: 处理 "Day 3" 这种全天事件
+        if (event.rawTime.toLowerCase().includes('day')) {
+             // 如果是全天事件，给它一个默认时间，比如凌晨 12:00 am
+             timeStr = "12:00 am";
+             console.log(`ℹ️ 发现全天事件: ${event.title}, 默认为 12:00 am`);
+        } else {
+             // 正常时间: 9:30pm -> 9:30 pm
+             timeStr = event.rawTime.replace(/(\d)(am|pm)/i, '$1 $2');
+        }
+        
+        // 修正时区 (美国服务器 -0800)
         let dateStr = `${event.rawDate} ${year} ${timeStr} -0800`;
         
         const dateObj = new Date(dateStr);
 
         if (!isNaN(dateObj.getTime())) {
-           // 存入数据库 (使用 title+date 作为唯一标识，防止重复插入)
            await NewsEvent.findOneAndUpdate(
             { title: event.title, date: dateObj },
             { ...event, date: dateObj },
