@@ -52,10 +52,10 @@ const scrapeForexFactory = async () => {
           }));
           
           await page.setCookie({
-            name: 'ff_calendar_filters', 
-            value: filterConfig, 
-            domain: '.forexfactory.com', 
-            path: '/', 
+            name: 'ff_timezone_offset',
+            value: '8', // 马来西亚是 GMT+8
+            domain: '.forexfactory.com',
+            path: '/',
             expires: Math.floor(Date.now() / 1000) + 31536000
           });
 
@@ -164,7 +164,7 @@ const scrapeForexFactory = async () => {
                  timeStr = event.rawTime.replace(/(\d)(am|pm)/i, '$1 $2');
             }
             
-            let dateStr = `${event.rawDate} ${year} ${timeStr} -0800`;
+            let dateStr = `${event.rawDate} ${year} ${timeStr} +0800`;
             const dateObj = new Date(dateStr);
 
             if (!isNaN(dateObj.getTime())) {
