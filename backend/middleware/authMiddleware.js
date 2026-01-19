@@ -1,47 +1,59 @@
-const { auth } = require('../config/firebase');
+// backend/middleware/authMiddleware.js
+const { auth } = require('../firebase'); // 👈 注意：确保这里路径对，是导出 admin.auth() 的那个文件
+const User = require('../models/User');   // 👈 必须引入 User 模型
 
-const authMiddleware = async (req, res, next) => {
+const protect = async (req, res, next) => {
+  let token;
+
   try {
     const authHeader = req.headers.authorization;
-    
-    // 1. 检查有没有 Header
+
+    // 1. 检查 Header
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       console.log("❌ [Auth] 缺少 Authorization Header");
       return res.status(401).json({ error: 'No token provided' });
     }
 
-    const token = authHeader.split(' ')[1];
-    
-    // 2. 打印 Token 前几位，确认收到了东西 (不要打印全部，不安全)
-    console.log(`🔍 [Auth] 收到 Token: ${token.substring(0, 10)}...`);
-    
-    // 3. 尝试验证
+    token = authHeader.split(' ')[1];
+
+    // 2. 验证 Token (Firebase 侧)
+    // console.log(`🔍 [Auth] 收到 Token: ${token.substring(0, 10)}...`); 
     const decodedToken = await auth.verifyIdToken(token);
     
-    console.log("✅ [Auth] Token 验证成功! UID:", decodedToken.uid);
-    req.user = decodedToken;
-    next();
-    
-  } catch (error) {
-    // 🔥🔥🔥 关键：打印详细的 Firebase 错误信息 🔥🔥🔥
-    console.error("❌ [Auth] 验证失败详情:", JSON.stringify(error, null, 2));
-    console.error("❌ [Auth] 错误代码 (Code):", error.code);
-    console.error("❌ [Auth] 错误信息 (Message):", error.message);
+    // 3. 🔥关键修复：去 MongoDB 查找对应的用户
+    // 假设你的 User 模型里存了 firebaseUid，或者用 email 查找
+    // 这里的逻辑通常是：User.findOne({ firebaseUid: decodedToken.uid }) 
+    // 或者如果你的逻辑是用 email 关联：
+    const user = await User.findOne({ email: decodedToken.email });
 
-    // 根据具体错误返回不同提示
+    if (!user) {
+      console.error("❌ [Auth] Token 有效，但在数据库没找到该用户:", decodedToken.email);
+      return res.status(404).json({ error: 'User not found in database' });
+    }
+
+    // 4. ✅ 验证成功，把 数据库User对象 (包含 _id) 赋给 req.user
+    console.log(`✅ [Auth] 验证通过! 用户: ${user.email} (ID: ${user._id})`);
+    req.user = user; 
+    next();
+
+  } catch (error) {
+    // 5. 详细错误日志 (保留你写的优秀日志逻辑)
+    console.error("❌ [Auth] 验证失败详情:", JSON.stringify(error, null, 2));
+    
     if (error.code === 'auth/argument-error') {
        return res.status(401).json({ error: 'Token 格式错误 (Argument Error)' });
     }
     if (error.code === 'auth/id-token-expired') {
-       return res.status(401).json({ error: 'Token 已过期 (Expired)' });
+       return res.status(401).json({ error: 'Token 已过期 (Expired) - 请重新登录' });
     }
     if (error.code === 'auth/invalid-credential') {
-        // 这是最常见的情况：密钥不对
-       return res.status(401).json({ error: '服务端密钥配置错误 (Invalid Credential)' });
+       //这是最可能的情况：Railway 的环境变量私钥配置错了
+       console.error("🔥🔥🔥 极高概率：Railway 环境变量 FIREBASE_PRIVATE_KEY 格式不对！");
+       return res.status(401).json({ error: '服务端配置错误 (Server Credential Error)' });
     }
 
     res.status(401).json({ error: 'Authentication failed', details: error.message });
   }
 };
 
-module.exports = authMiddleware;
+module.exports = { protect };

@@ -19,7 +19,7 @@ const PaymentModal = ({ onClose, onUpgrade }) => {
         return;
       }
 
-      const token = await user.getIdToken();
+      const token = await user.getIdToken(true);
 
       // 请求后端创建 USDT 订单
       const response = await fetch(`${API_BASE}/api/crypto/create`, {
