@@ -1,5 +1,5 @@
 // backend/middleware/authMiddleware.js
-const { auth } = require('../firebase'); // 👈 注意：确保这里路径对，是导出 admin.auth() 的那个文件
+const { auth } = require('../config/firebase'); // 👈 注意：确保这里路径对，是导出 admin.auth() 的那个文件
 const User = require('../models/User');   // 👈 必须引入 User 模型
 
 const protect = async (req, res, next) => {
