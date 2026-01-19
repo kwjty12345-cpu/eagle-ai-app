@@ -6,8 +6,9 @@ const NewsEvent = require('../models/NewsEvent');
 puppeteer.use(StealthPlugin());
 
 const scrapeForexFactory = async () => {
-  console.log('🕷️ 启动 V5.1 修正版 (修复美国时区 + WEF漏抓)...');
+  console.log('🕷️ 启动 V5.2 最终修正版 (抓取 USD + All, 修复美国时差)...');
 
+  // 1. 数据库连接
   if (mongoose.connection.readyState === 0) {
       console.log('⚠️ 建立临时数据库连接...');
       await mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/forex_data');
@@ -15,29 +16,29 @@ const scrapeForexFactory = async () => {
 
   let browser;
   try {
+    // 启动浏览器 (移除 timezone args，直接让 FF 根据服务器IP(美国)显示时间)
     browser = await puppeteer.launch({
       headless: "new",
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        // '--timezone=Asia/Kuala_Lumpur' // ❌ 删掉这行，既然服务器是美国IP，强制浏览器的时区也没用，FF是根据IP给时间的
-      ],
-      // ❌ env 里的 TZ 也可以去掉，或者留着也没事，关键是下面的解析逻辑
+      args: ['--no-sandbox', '--disable-setuid-sandbox']
     });
 
     const page = await browser.newPage();
     
-    // 开启日志
+    // 开启控制台日志，方便调试
     page.on('console', msg => {
         const text = msg.text();
         if (text.startsWith('DEBUG:')) console.log(text);
     });
 
-    // 3. 注入 Filter Cookie
+    // ============================================================
+    // 3. 注入 Filter Cookie (关键修改!)
+    // ============================================================
+    // ❌ 之前的问题：ForexFactory 不识别 currencies: ["USD", "All"] 这种组合，可能导致返回0条。
+    // ✅ 解决方案：Cookie 里完全不写 currencies (代表请求所有货币)，我们在代码里自己挑 USD 和 All。
     const filterConfig = encodeURIComponent(JSON.stringify({
-      impacts: ["3"], // High Impact
-      currencies: ["USD", "All"], // ✅ 修改1: 加上 "All"，否则 WEF 这种全球会议会被漏掉
-      events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] 
+      impacts: ["3"], // 只看红色 (High Impact)
+      events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] // 保留你的事件ID过滤
+      // currencies: ... 👈 删掉这行，让网站返回所有货币，防止漏掉 "All"
     }));
     
     await page.setCookie({
@@ -48,7 +49,8 @@ const scrapeForexFactory = async () => {
       expires: Math.floor(Date.now() / 1000) + 31536000
     });
 
-    const weeks = ['this', 'next']; // 建议改为 this 和 next，防止周日漏掉下周一的数据
+    // 扫描本周和下周 (持续更新)
+    const weeks = ['this', 'next'];
 
     for (const week of weeks) {
       console.log(`\n📅 正在扫描 week=${week}`);
@@ -76,6 +78,9 @@ const scrapeForexFactory = async () => {
       
       await new Promise(r => setTimeout(r, 1000));
 
+      // ============================================================
+      // 🕵️ 抓取与筛选
+      // ============================================================
       const rawEvents = await page.evaluate(() => {
         const data = [];
         const rows = document.querySelectorAll('tr.calendar__row'); 
@@ -83,12 +88,14 @@ const scrapeForexFactory = async () => {
         let memDate = ""; 
         let memTime = ""; 
         
+        console.log(`DEBUG: 页面总行数: ${rows.length}`); 
+
         rows.forEach((row, index) => {
           const getText = (s) => { const el = row.querySelector(s); return el ? el.textContent.trim() : ""; };
           
           let rawDate = getText('.calendar__date');
           let rawTime = getText('.calendar__time');
-          let rawCurrency = getText('.calendar__currency');
+          let rawCurrency = getText('.calendar__currency'); // 这里现在会抓到 EUR, GBP, USD, All 等
           const title = getText('.calendar__event-title');
 
           if (rawDate && rawDate.length > 1) memDate = rawDate;
@@ -100,7 +107,8 @@ const scrapeForexFactory = async () => {
           const iconClass = impactEl ? impactEl.className : "";
           const isRed = iconClass.includes('impact-red') || iconClass.includes('high') || iconClass.includes('impact-3');
 
-          // ✅ 修改2: 允许 USD 或者 All (WEF 会议)
+          // ✅ 核心过滤逻辑：只在 JS 里过滤
+          // 只要是红色，并且货币是 (USD 或 All 或 空-堆叠事件)，就保留
           const isTargetCurrency = (rawCurrency === 'USD' || rawCurrency === 'All');
           
           if (isRed) {
@@ -113,10 +121,10 @@ const scrapeForexFactory = async () => {
                       previous: getText('.calendar__previous')
                   });
               }
-              // 处理堆叠事件 (继承上一行的货币)
+              // 处理堆叠事件 (货币栏为空，通常继承上一行)
+              // 例如 PMI 数据经常堆叠显示，必须保留
               else if (rawCurrency === '') {
-                 // 这里简单处理，假设堆叠的都是我们想要的，或者你可以加逻辑判断 memCurrency
-                 data.push({
+                  data.push({
                       title, currency: 'USD', impact: 'High', 
                       rawDate: memDate, rawTime: memTime, 
                       forecast: getText('.calendar__forecast'), 
@@ -139,22 +147,25 @@ const scrapeForexFactory = async () => {
         const currentMonth = new Date().getMonth();
         let year = currentYear;
         
+        // 跨年处理
         if (event.rawDate.includes('Dec') && currentMonth === 0) year = currentYear - 1;
         else if (event.rawDate.includes('Jan') && currentMonth === 11) year = currentYear + 1;
 
         let timeStr = event.rawTime.replace(/(\d)(am|pm)/i, '$1 $2');
         
-        // ✅ 修改3: 核心修复！将 +0800 改为 -0800
-        // 解释：因为爬下来的 "5:30am" 是美国时间(PST)。
-        // 我们告诉 Date 对象："这是 -0800 时区的时间"。
-        // Date 对象会自动把它换算成 UTC，当你前端显示时，它就会自动变回 9:30 PM (KL时间)
+        // 🔥🔥🔥 核心时间修正 🔥🔥🔥
+        // 1. 爬下来的 "5:30am" 是美国时间 (PST)。
+        // 2. 我们拼接 "-0800"。
+        // 3. new Date() 会把它自动转成 UTC。
+        // 4. 当你在马来西亚前端显示时，它会自动 +8，变成 21:30 (9:30 PM)。
         let dateStr = `${event.rawDate} ${year} ${timeStr} -0800`;
         
         const dateObj = new Date(dateStr);
 
         if (!isNaN(dateObj.getTime())) {
+           // 存入数据库
            await NewsEvent.findOneAndUpdate(
-            { title: event.title, date: dateObj }, // 这样能避免重复，但建议最好先清库
+            { title: event.title, date: dateObj },
             { ...event, date: dateObj },
             { upsert: true, new: true, setDefaultsOnInsert: true }
           );
