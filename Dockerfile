@@ -14,7 +14,7 @@ USER root
 
 # 复制 package.json 并安装依赖
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 
 # 复制其余代码
 COPY . .
