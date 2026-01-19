@@ -6,7 +6,7 @@ const NewsEvent = require('../models/NewsEvent');
 puppeteer.use(StealthPlugin());
 
 const scrapeForexFactory = async () => {
-  console.log('🕷️ 启动 V5.2 最终修正版 (抓取 USD + All, 修复美国时差)...');
+  console.log('🕷️ 启动 V5.3 最终修正版 (抓取 USD + All + 修复 Railway 时差)...');
 
   // 1. 数据库连接
   if (mongoose.connection.readyState === 0) {
@@ -16,7 +16,7 @@ const scrapeForexFactory = async () => {
 
   let browser;
   try {
-    // 启动浏览器 (移除 timezone args，直接让 FF 根据服务器IP(美国)显示时间)
+    // 启动浏览器 (无需 emulateTimezone args，因为 Railway IP 本身就是美国)
     browser = await puppeteer.launch({
       headless: "new",
       args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -24,7 +24,7 @@ const scrapeForexFactory = async () => {
 
     const page = await browser.newPage();
     
-    // 开启控制台日志，方便调试
+    // 开启日志
     page.on('console', msg => {
         const text = msg.text();
         if (text.startsWith('DEBUG:')) console.log(text);
@@ -33,12 +33,12 @@ const scrapeForexFactory = async () => {
     // ============================================================
     // 3. 注入 Filter Cookie (关键修改!)
     // ============================================================
-    // ❌ 之前的问题：ForexFactory 不识别 currencies: ["USD", "All"] 这种组合，可能导致返回0条。
-    // ✅ 解决方案：Cookie 里完全不写 currencies (代表请求所有货币)，我们在代码里自己挑 USD 和 All。
+    // 解释：为了不漏掉 "WEF" (All 货币)，我们不能在 Cookie 里写 currencies: ["USD"]。
+    // 我们让网站返回所有货币，然后在下面的 JS 代码里精准筛选。
     const filterConfig = encodeURIComponent(JSON.stringify({
-      impacts: ["3"], // 只看红色 (High Impact)
+      impacts: ["3"], // High Impact (红色)
       events: ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"] // 保留你的事件ID过滤
-      // currencies: ... 👈 删掉这行，让网站返回所有货币，防止漏掉 "All"
+      // currencies: [] 👈 故意删掉这行，让它返回 USD, EUR, All 等所有数据
     }));
     
     await page.setCookie({
@@ -49,7 +49,8 @@ const scrapeForexFactory = async () => {
       expires: Math.floor(Date.now() / 1000) + 31536000
     });
 
-    // 扫描本周和下周 (持续更新)
+    // ✅ 修改：为了持续使用，抓取 "本周" 和 "下周" (预测未来需要下周数据)
+    // 如果你需要历史数据训练 AI，可以加上 'last' -> ['last', 'this', 'next']
     const weeks = ['this', 'next'];
 
     for (const week of weeks) {
@@ -95,7 +96,7 @@ const scrapeForexFactory = async () => {
           
           let rawDate = getText('.calendar__date');
           let rawTime = getText('.calendar__time');
-          let rawCurrency = getText('.calendar__currency'); // 这里现在会抓到 EUR, GBP, USD, All 等
+          let rawCurrency = getText('.calendar__currency'); 
           const title = getText('.calendar__event-title');
 
           if (rawDate && rawDate.length > 1) memDate = rawDate;
@@ -107,8 +108,8 @@ const scrapeForexFactory = async () => {
           const iconClass = impactEl ? impactEl.className : "";
           const isRed = iconClass.includes('impact-red') || iconClass.includes('high') || iconClass.includes('impact-3');
 
-          // ✅ 核心过滤逻辑：只在 JS 里过滤
-          // 只要是红色，并且货币是 (USD 或 All 或 空-堆叠事件)，就保留
+          // ✅ 这里的逻辑实现了你的 Filter 需求：
+          // 虽然 Cookie 拿回了所有货币，但我们只把 USD 和 All 存进数组
           const isTargetCurrency = (rawCurrency === 'USD' || rawCurrency === 'All');
           
           if (isRed) {
@@ -121,8 +122,7 @@ const scrapeForexFactory = async () => {
                       previous: getText('.calendar__previous')
                   });
               }
-              // 处理堆叠事件 (货币栏为空，通常继承上一行)
-              // 例如 PMI 数据经常堆叠显示，必须保留
+              // 处理堆叠事件 (例如 9:30pm 有两个 USD 事件，第二个通常没有货币符号)
               else if (rawCurrency === '') {
                   data.push({
                       title, currency: 'USD', impact: 'High', 
@@ -153,17 +153,17 @@ const scrapeForexFactory = async () => {
 
         let timeStr = event.rawTime.replace(/(\d)(am|pm)/i, '$1 $2');
         
-        // 🔥🔥🔥 核心时间修正 🔥🔥🔥
-        // 1. 爬下来的 "5:30am" 是美国时间 (PST)。
-        // 2. 我们拼接 "-0800"。
-        // 3. new Date() 会把它自动转成 UTC。
-        // 4. 当你在马来西亚前端显示时，它会自动 +8，变成 21:30 (9:30 PM)。
+        // 🔥🔥🔥 核心修复 🔥🔥🔥
+        // 1. 爬虫在 Railway (美国) 看到的 "5:30am" 是美国时间。
+        // 2. 我们把它标记为 "-0800" (美国西海岸时区)。
+        // 3. 数据库会把它存为标准 UTC 时间。
+        // 4. 当你的前端 (在马来西亚) 读取时，它会自动 +8 小时，变回正确的 21:30 (9:30 PM)。
         let dateStr = `${event.rawDate} ${year} ${timeStr} -0800`;
         
         const dateObj = new Date(dateStr);
 
         if (!isNaN(dateObj.getTime())) {
-           // 存入数据库
+           // 存入数据库 (使用 title+date 作为唯一标识，防止重复插入)
            await NewsEvent.findOneAndUpdate(
             { title: event.title, date: dateObj },
             { ...event, date: dateObj },
