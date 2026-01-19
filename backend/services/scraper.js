@@ -52,10 +52,10 @@ const scrapeForexFactory = async () => {
           }));
           
           await page.setCookie({
-            name: 'ff_timezone_offset',
-            value: '8', // 马来西亚是 GMT+8
-            domain: '.forexfactory.com',
-            path: '/',
+            name: 'ff_calendar_filters', 
+            value: filterConfig, 
+            domain: '.forexfactory.com', 
+            path: '/', 
             expires: Math.floor(Date.now() / 1000) + 31536000
           });
 
