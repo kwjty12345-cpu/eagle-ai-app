@@ -27,26 +27,54 @@ const NewsCard = ({ eventGroup, userTier, onUnlock }) => {
   ) || eventGroup[0];
    
   // 检查是否有数据库存好的预测结果
-  const existingPrediction = eventGroup[0].ai_prediction?.direction ? eventGroup[0].ai_prediction : null;
+  const existingPrediction = eventGroup[0].ai_prediction?.direction ? {
+    direction: eventGroup[0].ai_prediction.direction,
+    confidence: typeof eventGroup[0].ai_prediction.confidence === 'number' 
+      ? eventGroup[0].ai_prediction.confidence 
+      : parseInt(eventGroup[0].ai_prediction.confidence) || 0,
+    confidenceLevel: eventGroup[0].ai_prediction.confidenceLevel || 'MED',
+    reason: eventGroup[0].ai_prediction.reason || 'No reason provided'
+  } : null;
 
   const formatEventDate = (dateString) => {
     if (!dateString) return "Pending";
     const eventDate = new Date(dateString);
+    
+    // 转换为马来西亚时区 (GMT+8)
+    const malaysiaTime = new Date(eventDate.toLocaleString("en-US", { timeZone: "Asia/Kuala_Lumpur" }));
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const nowMalaysia = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kuala_Lumpur" }));
+    
+    const today = new Date(nowMalaysia.getFullYear(), nowMalaysia.getMonth(), nowMalaysia.getDate());
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const timeStr = eventDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-
-    if (eventDate.getTime() > now.getTime() && eventDate.getDate() === now.getDate()) return `Today ${timeStr}`;
-    if (eventDate.getDate() === today.getDate()) return `Today ${timeStr}`;
-    if (eventDate.getDate() === tomorrow.getDate()) return `Tomorrow ${timeStr}`;
     
-    return `${eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} ${timeStr}`;
+    const eventDay = new Date(malaysiaTime.getFullYear(), malaysiaTime.getMonth(), malaysiaTime.getDate());
+    
+    // 使用马来西亚时区格式化时间
+    const timeStr = malaysiaTime.toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      hour12: false,
+      timeZone: 'Asia/Kuala_Lumpur'
+    });
+
+    if (eventDay.getTime() === today.getTime()) return `Today ${timeStr}`;
+    if (eventDay.getTime() === tomorrow.getTime()) return `Tomorrow ${timeStr}`;
+    
+    return `${malaysiaTime.toLocaleDateString('en-US', { 
+      weekday: 'short', 
+      month: 'short', 
+      day: 'numeric',
+      timeZone: 'Asia/Kuala_Lumpur'
+    })} ${timeStr}`;
   };
 
-  // 判断是否是未来的新闻
-  const isFuture = new Date(mainEvent.date) > new Date();
+  // 判断是否是未来的新闻（使用马来西亚时区）
+  const getMalaysiaTime = (date) => {
+    return new Date(new Date(date).toLocaleString("en-US", { timeZone: "Asia/Kuala_Lumpur" }));
+  };
+  const isFuture = getMalaysiaTime(mainEvent.date) > getMalaysiaTime(new Date());
    
   const finalPrediction = prediction || existingPrediction;
 
@@ -202,11 +230,15 @@ const NewsCard = ({ eventGroup, userTier, onUnlock }) => {
                                   <span className={`px-4 py-1.5 rounded text-white font-black text-sm uppercase ${finalPrediction.direction === 'BUY' ? 'bg-green-500 shadow-[0_0_15px_rgba(34,197,94,0.4)]' : finalPrediction.direction === 'SELL' ? 'bg-red-500 shadow-[0_0_15px_rgba(239,68,68,0.4)]' : 'bg-slate-600'}`}>{finalPrediction.direction}</span>
                               </div>
                               <div className="flex flex-col items-center justify-center py-5 relative z-10">
-                                  <span className="text-slate-400 text-[9px] font-bold uppercase mb-2">Probability</span>
-                                  <span className="text-white font-black text-xl drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]">{finalPrediction.confidence}%</span>
+                                  <span className="text-slate-400 text-[9px] font-bold uppercase mb-2">Confidence</span>
+                                  <span className="text-white font-black text-xl drop-shadow-[0_0_5px_rgba(255,255,255,0.5)]">
+                                    {typeof finalPrediction.confidence === 'number' 
+                                      ? `${finalPrediction.confidence}%` 
+                                      : finalPrediction.confidence || '0%'}
+                                  </span>
                               </div>
                               <div className="flex flex-col items-center justify-center py-5 relative z-10">
-                                  <span className="text-slate-400 text-[9px] font-bold uppercase mb-2">Confidence</span>
+                                  <span className="text-slate-400 text-[9px] font-bold uppercase mb-2">Level</span>
                                   <span className={`font-black text-sm uppercase ${finalPrediction.confidenceLevel === 'HIGH' ? 'text-red-500 drop-shadow-[0_0_8px_rgba(239,68,68,0.6)]' : finalPrediction.confidenceLevel === 'MED' ? 'text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]' : 'text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.6)]'}`}>{finalPrediction.confidenceLevel || 'MED'}</span>
                               </div>
                           </div>

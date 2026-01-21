@@ -11,9 +11,10 @@ const NewsEventSchema = new mongoose.Schema({
   
   // 👇 新增：用来存 AI 预测结果
   ai_prediction: {
-    direction: { type: String, default: null },   // 例如: "Bullish" / "Bearish"
-    confidence: { type: String, default: null },  // 例如: "High" / "Medium"
-    probability: { type: String, default: null }, // 例如: "85%"
+    direction: { type: String, default: null },   // 例如: "BUY" / "SELL" / "NEUTRAL"
+    confidence: { type: Number, default: null },  // 例如: 60-99 (数字)
+    confidenceLevel: { type: String, default: null }, // 例如: "HIGH" / "MED" / "LOW"
+    reason: { type: String, default: null }, // AI 分析原因
     predictedAt: { type: Date, default: Date.now } // 记录预测时间
   }
 });

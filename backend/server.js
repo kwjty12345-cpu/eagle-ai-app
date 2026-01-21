@@ -55,14 +55,17 @@ mongoose.connection.once('open', () => {
     }
 });
 
-// --- 定时任务 ---
+// --- 定时任务：每周自动爬取本周新闻 ---
+// 注意：cron 使用的是服务器本地时间（UTC），请根据部署环境调整
+// 周一凌晨1点（UTC）= 马来西亚时间早上9点（UTC+8）
 cron.schedule('0 1 * * 1', () => {
-  console.log('⏰ 定时任务触发：开始抓取本周新新闻...');
+  console.log('⏰ [定时任务] 每周一自动抓取本周新闻...');
   scrapeForexFactory();
 });
 
+// 周二早上8点（UTC）= 马来西亚时间下午4点（UTC+8）补漏同步
 cron.schedule('0 8 * * 2', () => {
-  console.log('⏰ 补漏任务触发：周二早上再次同步...');
+  console.log('⏰ [补漏任务] 周二早上再次同步本周新闻...');
   scrapeForexFactory();
 });
 
@@ -100,17 +103,21 @@ app.get('/api/predict', async (req, res) => {
     if (events.length === 1 && events[0]._id) {
         const eventId = events[0]._id;
         
+        // 确保数据格式正确
+        const predictionData = {
+            direction: prediction.direction || 'NEUTRAL',
+            confidence: typeof prediction.confidence === 'number' ? prediction.confidence : parseInt(prediction.confidence) || 0,
+            confidenceLevel: prediction.confidenceLevel || 'LOW',
+            reason: prediction.reason || 'No reason provided',
+            predictedAt: new Date()
+        };
+        
         await NewsEvent.findByIdAndUpdate(eventId, {
             $set: {
-                ai_prediction: {
-                    direction: prediction.direction || prediction.sales_direction,
-                    confidence: prediction.confidence || prediction.confident,
-                    probability: prediction.probability,
-                    predictedAt: new Date()
-                }
+                ai_prediction: predictionData
             }
         });
-        console.log(`💾 AI 预测结果已保存至事件 ID: ${eventId}`);
+        console.log(`💾 AI 预测结果已保存至事件 ID: ${eventId}`, predictionData);
     }
 
     res.json(prediction);
