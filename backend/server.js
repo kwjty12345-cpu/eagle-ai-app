@@ -62,23 +62,23 @@ cron.schedule('0 8 * * 2', () => {
 });
 
 // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-// 👇👇👇 新增代码：AI 自动分析监工 (每10分钟运行一次) 👇👇👇
-// 🔥🔥🔥 AI 自动分析监工 (持续刷新版) 🔥🔥🔥
-// 每 10 分钟运行一次
-cron.schedule('*/10 * * * *', async () => {
-    console.log('🤖 [AI 监工] 开始刷新未来新闻的预测...');
+// 🔥🔥🔥 AI 自动分析监工 (24小时刷新版) 🔥🔥🔥
+// 修改点 1: 时间改为 '0 0 * * *' (代表每天 00:00 运行)
+cron.schedule('0 0 * * *', async () => {
+    console.log('🤖 [AI 监工] 开始执行每日定时刷新...');
 
     try {
         // 1. 查找所有“未来”的新闻
-        //    注意：这里去掉了 isAnalyzed 的限制，以便持续更新
         const futureEvents = await NewsEvent.find({
-            date: { $gt: new Date() } // ✅ 只要还没发生，就一直在这个列表里
+            date: { $gt: new Date() } 
         })
-        .sort({ date: 1 }) // 优先处理最近即将发生的新闻
-        .limit(10);        // 每次刷新最近的 10 条 (避免消耗太多资源)
+        .sort({ date: 1 }) 
+        // 🔥 修改点 2: 既然一天只跑一次，建议把 limit 调大 (比如 50)
+        // 确保能覆盖未来 24 小时内所有可能发生的新闻，防止漏单
+        .limit(50); 
 
         if (futureEvents.length === 0) {
-            console.log('✅ 没有未来的新闻需要监控。');
+            console.log('✅ 未来24小时没有需要更新的新闻。');
             return;
         }
 
@@ -90,7 +90,7 @@ cron.schedule('*/10 * * * *', async () => {
                 // 调用 AI 获取最新预测
                 const prediction = await getPrediction([event]);
 
-                // 3. 覆盖写入 (overwrite)
+                // 3. 覆盖写入
                 await NewsEvent.findByIdAndUpdate(event._id, {
                     $set: {
                         ai_prediction: {
@@ -99,11 +99,11 @@ cron.schedule('*/10 * * * *', async () => {
                             confidence: prediction.confidence,
                             confidenceLevel: prediction.confidenceLevel,
                             reason: prediction.reason,
-                            predictedAt: new Date() // ✅ 更新为最新的分析时间
+                            predictedAt: new Date() // 更新时间
                         }
                     }
                 });
-                console.log(`🔄 [已更新] ${event.title} -> ${prediction.direction} (Confidence: ${prediction.confidence}%)`);
+                console.log(`🔄 [每日更新] ${event.title} -> ${prediction.direction}`);
 
             } catch (innerErr) {
                 console.error(`❌ 刷新失败 (${event.title}):`, innerErr.message);
