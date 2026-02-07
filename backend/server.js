@@ -6,7 +6,7 @@ const cron = require('node-cron');
 
 const connectDB = require('./config/db');
 const userRoutes = require('./routes/userRoutes');
-const cryptoRoutes = require('./routes/cryptoRoutes'); // ✅ 确保这里引入了
+const cryptoRoutes = require('./routes/cryptoRoutes'); 
 
 const scrapeForexFactory = require('./services/scraper');
 const NewsEvent = require('./models/NewsEvent');
@@ -14,21 +14,16 @@ const { getPrediction } = require('./services/aiService');
 
 const app = express();
 
-// --- CORS 配置 (允许线上前端访问) ---
+// --- CORS 配置 ---
 const allowedOrigins = [
   "http://localhost:5173",
-  "https://eagle-ai-app.vercel.app" // 你的线上前端域名
+  "https://eagle-ai-app.vercel.app" 
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
-    // 允许没有 origin 的请求 (比如 Postman, 爬虫, 本地请求)
     if (!origin) return callback(null, true);
-    
-    // 检查 origin 是否在白名单里
     if (allowedOrigins.indexOf(origin) === -1) {
-      // ⚠️ 生产环境宽容模式: 即使不在白名单也允许 (为了防止域名变动导致的误杀)
-      // 如果你想严格限制，把下面这行改成: return callback(new Error('CORS not allowed'), false);
       return callback(null, true); 
     }
     return callback(null, true);
@@ -40,7 +35,7 @@ app.use(express.json());
 
 // --- 注册路由 ---
 app.use('/api/users', userRoutes);
-app.use('/api/crypto', cryptoRoutes); // ✅ 确保支付路由启用
+app.use('/api/crypto', cryptoRoutes); 
 
 // --- 连接数据库 ---
 connectDB();
@@ -48,26 +43,78 @@ connectDB();
 mongoose.connection.once('open', () => {
     try {
         console.log('🚀 服务器启动，正在执行首次数据同步...');
-        // 这里的爬虫可以根据需要开启或关闭
         scrapeForexFactory(); 
     } catch (e) {
         console.error("Scraper Init Error:", e);
     }
 });
 
-// --- 定时任务：每周自动爬取本周新闻 ---
-// 注意：cron 使用的是服务器本地时间（UTC），请根据部署环境调整
-// 周一凌晨1点（UTC）= 马来西亚时间早上9点（UTC+8）
+// --- 定时任务 1：每周自动爬取本周新闻 ---
 cron.schedule('0 1 * * 1', () => {
   console.log('⏰ [定时任务] 每周一自动抓取本周新闻...');
   scrapeForexFactory();
 });
 
-// 周二早上8点（UTC）= 马来西亚时间下午4点（UTC+8）补漏同步
+// --- 定时任务 2：周二补漏同步 ---
 cron.schedule('0 8 * * 2', () => {
   console.log('⏰ [补漏任务] 周二早上再次同步本周新闻...');
   scrapeForexFactory();
 });
+
+// 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+// 👇👇👇 新增代码：AI 自动分析监工 (每10分钟运行一次) 👇👇👇
+// 🔥🔥🔥 AI 自动分析监工 (持续刷新版) 🔥🔥🔥
+// 每 10 分钟运行一次
+cron.schedule('*/10 * * * *', async () => {
+    console.log('🤖 [AI 监工] 开始刷新未来新闻的预测...');
+
+    try {
+        // 1. 查找所有“未来”的新闻
+        //    注意：这里去掉了 isAnalyzed 的限制，以便持续更新
+        const futureEvents = await NewsEvent.find({
+            date: { $gt: new Date() } // ✅ 只要还没发生，就一直在这个列表里
+        })
+        .sort({ date: 1 }) // 优先处理最近即将发生的新闻
+        .limit(10);        // 每次刷新最近的 10 条 (避免消耗太多资源)
+
+        if (futureEvents.length === 0) {
+            console.log('✅ 没有未来的新闻需要监控。');
+            return;
+        }
+
+        console.log(`🔄 正在刷新 ${futureEvents.length} 条新闻的分析...`);
+
+        // 2. 逐条重新分析并覆盖数据库
+        for (const event of futureEvents) {
+            try {
+                // 调用 AI 获取最新预测
+                const prediction = await getPrediction([event]);
+
+                // 3. 覆盖写入 (overwrite)
+                await NewsEvent.findByIdAndUpdate(event._id, {
+                    $set: {
+                        ai_prediction: {
+                            isAnalyzed: true, 
+                            direction: prediction.direction,
+                            confidence: prediction.confidence,
+                            confidenceLevel: prediction.confidenceLevel,
+                            reason: prediction.reason,
+                            predictedAt: new Date() // ✅ 更新为最新的分析时间
+                        }
+                    }
+                });
+                console.log(`🔄 [已更新] ${event.title} -> ${prediction.direction} (Confidence: ${prediction.confidence}%)`);
+
+            } catch (innerErr) {
+                console.error(`❌ 刷新失败 (${event.title}):`, innerErr.message);
+            }
+        }
+    } catch (err) {
+        console.error('💥 AI Cron 任务出错:', err);
+    }
+});
+// 👆👆👆 新增代码结束 👆👆👆
+// 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
 
 // --- API: 获取新闻列表 ---
 app.get('/api/news', async (req, res) => {
@@ -79,7 +126,7 @@ app.get('/api/news', async (req, res) => {
   }
 });
 
-// --- API: AI 预测 ---
+// --- API: AI 预测 (手动触发/前端调用) ---
 app.get('/api/predict', async (req, res) => {
   try {
     const eventData = req.query.data;
@@ -103,7 +150,6 @@ app.get('/api/predict', async (req, res) => {
     if (events.length === 1 && events[0]._id) {
         const eventId = events[0]._id;
         
-        // 确保数据格式正确
         const predictionData = {
             direction: prediction.direction || 'NEUTRAL',
             confidence: typeof prediction.confidence === 'number' ? prediction.confidence : parseInt(prediction.confidence) || 0,

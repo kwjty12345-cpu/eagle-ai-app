@@ -3,11 +3,12 @@ import { auth } from '../firebase';
 
 // 自动判断是本地开发还是线上环境
 const API_BASE = import.meta.env.MODE === "development"
-  ? "http://localhost:5000"
-  : "https://eagle-ai-app-production.up.railway.app"; // 你的 Railway 真实地址
+  ? "http://localhost:5000" // 或者你的 ngrok 地址 (如果正在测试回调)
+  : "https://eagle-ai-app-production.up.railway.app"; 
 
 const PaymentModal = ({ onClose, onUpgrade }) => {
   const [loading, setLoading] = useState(false);
+  const [promoCode, setPromoCode] = useState(''); // 👈 1. 新增：优惠码状态
 
   const handleSubscribe = async (planType) => {
     setLoading(true);
@@ -21,21 +22,24 @@ const PaymentModal = ({ onClose, onUpgrade }) => {
 
       const token = await user.getIdToken(true);
 
-      // 请求后端创建 USDT 订单
+      // 请求后端创建 Cryptomus 订单
       const response = await fetch(`${API_BASE}/api/crypto/create`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ plan: planType })
+        body: JSON.stringify({ 
+            plan: planType,
+            promoCode: promoCode // 👈 2. 修改：把优惠码发给后端
+        })
       });
 
       const data = await response.json();
 
       if (!response.ok) throw new Error(data.message || "Order creation failed");
 
-      // NowPayments 返回的是 invoice_url，直接跳转
+      // 这里的 data.url 是后端从 Cryptomus API 拿到的支付链接
       if (data.url) {
         window.location.href = data.url;
       }
@@ -122,6 +126,17 @@ const PaymentModal = ({ onClose, onUpgrade }) => {
               </li>
             </ul>
 
+            {/* 👈 3. 新增：Pro Plan 的输入框 */}
+            <div className="mb-3">
+                <input 
+                    type="text" 
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    placeholder="Promo Code (Optional)"
+                    className="w-full bg-gray-900/50 border border-gray-700 text-white text-sm rounded-lg p-2.5 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder-gray-600"
+                />
+            </div>
+
             <button 
               onClick={() => handleSubscribe('pro')}
               disabled={loading}
@@ -157,6 +172,17 @@ const PaymentModal = ({ onClose, onUpgrade }) => {
               </li>
             </ul>
 
+            {/* 👈 3. 新增：Elite Plan 的输入框 */}
+            <div className="mb-3">
+                <input 
+                    type="text" 
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    placeholder="Promo Code (Optional)"
+                    className="w-full bg-gray-900/50 border border-gray-700 text-white text-sm rounded-lg p-2.5 focus:border-orange-500 focus:ring-1 focus:ring-orange-500 outline-none transition-all placeholder-gray-600"
+                />
+            </div>
+
             <button 
               onClick={() => handleSubscribe('elite')}
               disabled={loading}
@@ -168,8 +194,9 @@ const PaymentModal = ({ onClose, onUpgrade }) => {
 
         </div>
         
+        {/* 👇 修改了这里的底部文字 👇 */}
         <p className="text-center text-gray-600 text-xs mt-8">
-          Powered by NowPayments. Supports USDT (TRC20/ERC20).
+          Secure Payment Powered by Cryptomus.
         </p>
       </div>
     </div>

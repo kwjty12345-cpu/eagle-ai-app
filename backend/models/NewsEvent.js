@@ -9,15 +9,34 @@ const NewsEventSchema = new mongoose.Schema({
   actual: String,
   previous: String,
   
-  // 👇 新增：用来存 AI 预测结果
+  // 👇 优化后的 AI 字段
   ai_prediction: {
-    direction: { type: String, default: null },   // 例如: "BUY" / "SELL" / "NEUTRAL"
-    confidence: { type: Number, default: null },  // 例如: 60-99 (数字)
-    confidenceLevel: { type: String, default: null }, // 例如: "HIGH" / "MED" / "LOW"
-    reason: { type: String, default: null }, // AI 分析原因
-    predictedAt: { type: Date, default: Date.now } // 记录预测时间
+    // 1. 加个开关，查询 "未分析新闻" 时更方便: find({ 'ai_prediction.isAnalyzed': false })
+    isAnalyzed: { type: Boolean, default: false },
+
+    // 2. 加 Enum 限制，保证数据纯净
+    direction: { 
+      type: String, 
+      enum: ['BUY', 'SELL', 'NEUTRAL', null], // 只允许这几个值
+      default: null 
+    }, 
+    
+    confidence: { type: Number, default: null }, 
+    
+    confidenceLevel: { 
+      type: String, 
+      enum: ['HIGH', 'MED', 'LOW', null], // 同样加限制
+      default: null 
+    }, 
+    
+    reason: { type: String, default: null }, 
+    
+    // 3. 去掉 default，只在真正分析时写入时间
+    predictedAt: { type: Date } 
   }
 });
 
-// 确保你导出的是这个修改后的模型
+// 创建索引：经常要查“某个时间段内”且“已分析”的新闻，加索引查询飞快
+NewsEventSchema.index({ date: 1, 'ai_prediction.isAnalyzed': 1 });
+
 module.exports = mongoose.model('NewsEvent', NewsEventSchema);

@@ -11,7 +11,7 @@ import PaymentModal from './components/PaymentModal';
 import DisclaimerModal from './components/DisclaimerModal';
 
 // 🟢 模式 A: 本地开发
-// const API_BASE = "http://localhost:5000";
+//const API_BASE = "http://localhost:5000";
 
 // 🔴 模式 B: 生产环境
 const API_BASE = "https://eagle-ai-app-production.up.railway.app";

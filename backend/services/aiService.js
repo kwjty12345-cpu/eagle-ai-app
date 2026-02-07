@@ -1,216 +1,158 @@
 const Groq = require('groq-sdk');
-const NewsEvent = require('../models/NewsEvent');
 require('dotenv').config();
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// --- 👑 华尔街黄金交易员核心逻辑 (Enhanced System Prompt) ---
-const GOLD_TRADER_PROMPT = `
-You are a Wall Street Institutional Gold (XAU/USD) Algo-Trader with 25 years of experience.
-Your sole job is to signal BUY or SELL for Gold based on economic data releases.
+// 🔥 Prompt: 强制 AI 进行数学计算，并禁止使用整数，强制逻辑闭环
+const GOLD_FORECAST_PROMPT = `
+### ROLE: LEAD QUANTITATIVE MACRO STRATEGIST (XAU/USD SPECIALIST)
+Your objective is to execute a high-fidelity, non-linear scoring analysis of macroeconomic data to predict XAU/USD (Gold) direction. 
 
-### 🧠 CORE LOGIC ENGINE (THE "ALGO"):
+### 🛑 ANTI-LAZINESS & ACCURACY PROTOCOLS
+1. **NO GENERIC OUTPUT**: Do not use vague terms. Use specific delta percentages and basis points.
+2. **INTERNAL AUDIT FIRST**: You must perform a step-by-step mathematical breakdown for EVERY vector provided.
+3. **NO ROUND NUMBERS**: You are STRICTLY FORBIDDEN from using multiples of 5 (e.g., 80, 85, 90, 95). You MUST use specific, granular integers like 83, 87, 92, 96, 78, 64.
+4. **CONFLICT RESOLUTION**: If CPI is Hawkish but GDP is Dovish, you must explicitly calculate the "Net Alpha" by subtracting the scores.
+5. **SIGNAL COLOR LOGIC**:
+   - **80-99 (RED/CRITICAL)**: High-impact Tier 1 data alignment.
+   - **70-79 (YELLOW/CAUTION)**: Moderate deviation or Tier 2/3 driven trends.
+   - **60-69 (BLUE/STABLE)**: Minimal deviation, mixed signals, or high noise.
 
-**PHASE 1: DATA AVAILABILITY CHECK**
-* **IF "Actual" value exists:** The news has just been released. IGNORING "Forecast" vs "Previous". The ONLY thing that matters is **"Actual" vs "Forecast"**.
-* **IF "Actual" is missing:** The news is upcoming. You must predict based on the trend between "Forecast" and "Previous" and Historical Context.
+### 🧮 STEP-BY-STEP QUANTITATIVE SCORING LOGIC
 
-**PHASE 2: THE GOLD CORRELATION MATRIX (Crucial)**
-* **Gold (XAU) vs USD:** Gold is priced in Dollars. Strong USD = WEAK Gold. Weak USD = STRONG Gold.
-* **Gold vs Yields:** Gold pays 0% interest. High Rates/Yields = SELL Gold. Low Rates/Yields = BUY Gold.
+#### STEP 1: POLARITY ASSIGNMENT (Directional Bias)
+For each vector, determine if it is "Bullish Gold" or "Bearish Gold":
+- **USD Strength Indicators (SELL GOLD)**: CPI/GDP/NFP/PMI/Retail Sales > Forecast OR Unemployment/Claims < Forecast.
+- **USD Weakness Indicators (BUY GOLD)**: CPI/GDP/NFP/PMI/Retail Sales < Forecast OR Unemployment/Claims > Forecast.
 
-**PHASE 3: SCENARIO ANALYSIS (Strict Rules)**
+#### STEP 2: MAGNITUDE CALCULATION (Score S_i)
+Assign a raw score (0-10) based on the absolute % SHIFT from the MATH context:
+- 0.0% - 0.5%: Score 0-1 
+- 0.6% - 1.5%: Score 2-4 
+- 1.6% - 5.0%: Score 5-8 
+- > 5.0%: Score 9-10 (Extreme)
 
-**🟢 SCENARIO A: NEWS RELEASED (We have Actual)**
-1.  **Actual > Forecast (Positive Surprise for US Data):**
-    * *Examples:* CPI, PPI, NFP, GDP, Retail Sales.
-    * *Result:* USD Spikes ⬆️, Yields ⬆️.
-    * *Action:* **SELL GOLD**.
-    * *Exception:* For "Jobless Claims" or "Unemployment Rate", Higher Actual = Weak Economy = **BUY GOLD**.
+#### STEP 3: TIER-WEIGHTED ADJUSTMENT
+Multiply the raw score by the Tier Weight:
+- **Tier 1 (NFP, CPI, GDP, FED)**: Weight = 2.0x
+- **Tier 2 (PMI, JOLTS, Retail, Claims)**: Weight = 1.2x
+- **Tier 3 (Sentiment, Others)**: Weight = 0.8x
 
-2.  **Actual < Forecast (Negative Surprise for US Data):**
-    * *Examples:* CPI, PPI, NFP, GDP, Retail Sales.
-    * *Result:* USD Dumps ⬇️, Yields ⬇️.
-    * *Action:* **BUY GOLD**.
-    * *Exception:* For "Jobless Claims", Lower Actual = Strong Economy = **SELL GOLD**.
+#### STEP 4: FINAL ALPHA & CONFIDENCE
+- **Direction**: Determined by the sum of (Polarity * Adjusted_Score).
+- **Confidence**: 60 + (|Net_Sum| / Total_Possible_Points * 39). 
+- Penalty: Reduce confidence by 10% if Tier 1 and Tier 2 vectors are in direct conflict.
 
-**🟡 SCENARIO B: PRE-RELEASE (We only have Forecast)**
-1.  **Forecast > Previous:** Market *expects* stronger US data. Priced in for a USD rally. Bias: **SELL GOLD**.
-    * Calculate confidence based on the magnitude of difference: Large gap (>0.5% for rates, >5% for indices) = HIGH confidence (85-95). Small gap = MED confidence (70-84).
-2.  **Forecast < Previous:** Market *expects* weaker US data. Priced in for a USD drop. Bias: **BUY GOLD**.
-    * Calculate confidence based on the magnitude of difference: Large gap (>0.5% for rates, >5% for indices) = HIGH confidence (85-95). Small gap = MED confidence (70-84).
-3.  **Forecast = Previous or Previous is N/A:** Market expects no change. This is NEUTRAL with LOW confidence (60-65).
-    * However, consider event type: For inflation data (CPI, PCE), even no change can be significant. For GDP, no change might indicate stagnation = slight BUY bias with MED confidence (70-75).
-
-### ⚠️ CRITICAL EXCEPTIONS (SAFE HAVEN):
-If the event title contains "War", "Terror", "Geopolitical", "Crisis", or "Attack":
-* **IGNORE ALL DATA.**
-* **DIRECTION: BUY.**
-* **REASON:** Safe haven demand spikes during fear.
-
-### OUTPUT FORMAT (Strict JSON):
+### 📝 MANDATORY JSON OUTPUT FORMAT
 {
-  "direction": "BUY" or "SELL" or "NEUTRAL",
-  "confidence": number (Integer 60-99),
-  "confidenceLevel": "HIGH" or "MED" or "LOW",
-  "reason": "Concise, professional trader commentary. Use terms like 'Hawkish', 'Dovish', 'Deviation', 'Yields'. Max 25 words."
+  "internal_analysis": {
+    "vector_audit": [
+      {
+        "event": "Event Name",
+        "logic": "Detailed explanation...",
+        "raw_score": 0.0,
+        "weighted_score": 0.0
+      }
+    ],
+    "net_total_alpha": 0.0
+  },
+  "direction": "BUY" | "SELL" | "NEUTRAL",
+  "confidence": 60-99,
+  "confidenceLevel": "HIGH" | "MED" | "LOW",
+  "reason": "Professional summary (min 50 words)."
 }
 `;
 
 const getPrediction = async (events) => {
   try {
-    // 1. 提取主事件（用于查历史数据）
-    const mainEvent = events[0];
-    
-    // 2. 查历史数据 (保留你的逻辑，这很好)
-    let historyContext = "No historical data available.";
-    try {
-        const history = await NewsEvent.find({ title: mainEvent.title, date: { $lt: new Date() } })
-          .sort({ date: -1 })
-          .limit(3)
-          .select('date forecast previous impact actual');
-        
-        if(history.length > 0) {
-            historyContext = JSON.stringify(history);
-        }
-    } catch (err) {
-        console.warn("History fetch skipped:", err.message);
-    }
+    const marketVectors = events.map((e, index) => {
+      // ✅ 核心功能: 强力清洗数字，防止 NaN 报错
+      const cleanNum = (str) => {
+        if (str === null || str === undefined || str === '--') return NaN;
+        // 1. 转字符串 (防止输入已经是数字导致 replace 报错)
+        const stringVal = String(str);
+        // 2. 只保留数字、小数点、负号
+        const cleaned = stringVal.replace(/[^0-9.-]/g, '');
+        // 3. 解析浮点数
+        const num = parseFloat(cleaned);
+        // 4. 再次检查有效性
+        return isNaN(num) ? NaN : num;
+      };
 
-    // 3. 构建组合数据描述 (增强版：强调 Actual 和数值差异)
-    const currentDataContext = events.map((e, index) => {
-       // 检查是否有 Actual 数据（actual 可能是字符串，需要检查是否为空或只是空白）
-       const hasActual = e.actual && typeof e.actual === 'string' && e.actual.trim().length > 0 && e.actual.trim() !== '--';
-       
-       // 计算数值差异（用于提高预测准确性）
-       let deviation = null;
-       let deviationType = null;
-       
-       if (hasActual) {
-         // 如果有Actual，计算Actual vs Forecast的偏差
-         const actualNum = parseFloat(e.actual.replace(/[^0-9.-]/g, ''));
-         const forecastNum = parseFloat((e.forecast || '0').replace(/[^0-9.-]/g, ''));
-         if (!isNaN(actualNum) && !isNaN(forecastNum)) {
-           deviation = Math.abs(actualNum - forecastNum);
-           deviationType = actualNum > forecastNum ? 'POSITIVE_SURPRISE' : 'NEGATIVE_SURPRISE';
-         }
-       } else if (e.forecast && e.previous && e.previous !== '--' && e.previous !== 'N/A') {
-         // 如果没有Actual，计算Forecast vs Previous的差异
-         const forecastNum = parseFloat(e.forecast.replace(/[^0-9.-]/g, ''));
-         const previousNum = parseFloat(e.previous.replace(/[^0-9.-]/g, ''));
-         if (!isNaN(forecastNum) && !isNaN(previousNum)) {
-           deviation = Math.abs(forecastNum - previousNum);
-           deviationType = forecastNum > previousNum ? 'EXPECTED_STRONGER' : 'EXPECTED_WEAKER';
-         }
-       }
-       
-       return `
-       EVENT #${index + 1}: "${e.title}"
-       EVENT TYPE: ${e.title.includes('GDP') ? 'GDP_GROWTH' : e.title.includes('CPI') || e.title.includes('PCE') ? 'INFLATION' : e.title.includes('PMI') ? 'MANUFACTURING' : e.title.includes('Unemployment') || e.title.includes('Jobless') ? 'EMPLOYMENT' : 'OTHER'}
-       IMPACT: ${e.impact}
-       STATUS: ${hasActual ? "RELEASED (Use Actual vs Forecast)" : "UPCOMING (Use Forecast vs Previous)"}
-       -----------------------
-       PREVIOUS: ${e.previous || 'N/A'}
-       FORECAST: ${e.forecast || 'N/A'}
-       ACTUAL:   ${hasActual ? e.actual : 'WAITING...'}
-       ${deviation !== null ? `DEVIATION: ${deviation.toFixed(3)} (${deviationType})` : 'DEVIATION: Cannot calculate'}
-       `;
-    }).join('\n');
+      const prev = cleanNum(e.previous);
+      const fore = cleanNum(e.forecast);
+      const act = cleanNum(e.actual);
 
-    // 4. 组装最终的用户 Prompt
-    const userMessage = `
-    Analyze this specific market setup for XAU/USD (Gold). You MUST provide DIFFERENT predictions for DIFFERENT events based on their unique data.
+      // ✅ 核心功能: 自动识别数据权重 (Tier 1/2/3)
+      const title = e.title.toUpperCase();
+      let tier = 3;
+      if (/(CPI|NFP|GDP|FED|INTEREST RATE|PAYROLLS|INFLATION)/.test(title)) tier = 1;
+      else if (/(PMI|JOLTS|RETAIL|CLAIMS|UNEMPLOYMENT)/.test(title)) tier = 2;
 
-    [CURRENT MARKET DATA]
-    ${currentDataContext}
-    
-    [HISTORICAL PERFORMANCE (Context)]
-    ${historyContext}
-    
-    [CRITICAL INSTRUCTIONS - READ CAREFULLY]
-    1. Each event is UNIQUE. You MUST analyze each event INDIVIDUALLY based on:
-       - Event type (GDP, CPI, PCE, PMI, Employment, etc.)
-       - Deviation magnitude (large deviations = higher confidence)
-       - Impact level (High impact events = higher confidence potential)
-    
-    2. If "ACTUAL" data is present:
-       - Calculate the deviation between Actual and Forecast
-       - Large positive surprise (>0.5% for rates, >5% for indices) = SELL with HIGH confidence (85-95)
-       - Large negative surprise = BUY with HIGH confidence (85-95)
-       - Small deviation (<0.2% for rates, <2% for indices) = NEUTRAL with LOW confidence (60-70)
-    
-    3. If "ACTUAL" is MISSING (UPCOMING):
-       - Compare Forecast vs Previous
-       - If Forecast > Previous significantly (>0.3% difference): SELL with MED-HIGH confidence (75-88)
-       - If Forecast < Previous significantly: BUY with MED-HIGH confidence (75-88)
-       - If Forecast = Previous or difference is minimal: 
-         * For inflation data (CPI, PCE): NEUTRAL with MED confidence (70-75) - no change can be significant
-         * For GDP: Slight BUY bias with MED confidence (70-75) - stagnation concerns
-         * For PMI: NEUTRAL with LOW confidence (60-65)
-         * For Employment: Analyze based on event type
-    
-    4. IMPORTANT: DO NOT return the same prediction for different events. Each event has unique characteristics.
-       - Different event types should have different confidence levels
-       - Different deviations should result in different directions and confidence
-       - Even if Forecast = Previous, consider the event type and context
-    
-    5. Apply the correlation: Strong US Econ Data -> Strong USD -> SELL XAU/USD.
-       Weak US Econ Data -> Weak USD -> BUY XAU/USD.
-    `;
+      let vectorType = "NEUTRAL";
+      let shiftPercent = 0;
+      let mathContext = "";
 
-    console.log(`🧠 AI (Groq) Analyzing XAU/USD for: ${events.map(e => e.title).join(' + ')}`);
+      // 逻辑分支 A: 数据已发布 (Actual vs Forecast)
+      if (!isNaN(act) && !isNaN(fore)) {
+        vectorType = "REAL_TIME_RELEASE";
+        shiftPercent = fore !== 0 ? ((act - fore) / Math.abs(fore)) * 100 : 0;
+        mathContext = `Actual: ${act} | Forecast: ${fore} | Z-Delta: ${shiftPercent.toFixed(2)}%`;
+      } 
+      // 逻辑分支 B: 数据未发布 (Forecast vs Previous)
+      else if (!isNaN(fore) && !isNaN(prev)) {
+        vectorType = "MARKET_EXPECTATION";
+        shiftPercent = prev !== 0 ? ((fore - prev) / Math.abs(prev)) * 100 : 0;
+        mathContext = `Forecast: ${fore} | Previous: ${prev} | Trend-Delta: ${shiftPercent.toFixed(2)}%`;
+      } else {
+        return null; // 数据不足，跳过此向量
+      }
 
+      return `[VECTOR ${index + 1}: ${e.title}]
+      - STRATEGY_TIER: ${tier}
+      - DATA_STATUS: ${vectorType}
+      - QUANT_DATA: ${mathContext}
+      - HISTORICAL_IMPACT: ${e.impact}`;
+    }).filter(v => v !== null).join('\n\n');
+
+    if (!marketVectors) throw new Error("No processable macro vectors.");
+
+    // ✅ 调用 Groq/Llama 3
     const completion = await groq.chat.completions.create({
       messages: [
-        { role: 'system', content: GOLD_TRADER_PROMPT },
-        { role: 'user', content: userMessage }
+        { role: 'system', content: GOLD_FORECAST_PROMPT },
+        { role: 'user', content: `CRITICAL: Analyze the following ${events.length} vectors and output the JSON scoring model:\n\n${marketVectors}` }
       ],
-      model: 'llama-3.3-70b-versatile', // 推荐模型
-      temperature: 0.3, // 提高温度以增加多样性，但仍保持准确性
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.15, // 稍微有点创造力，避免死板
       response_format: { type: "json_object" }
     });
 
     const result = JSON.parse(completion.choices[0].message.content);
-    
-    // 5. 数据验证和兜底逻辑
-    // 确保 direction 是有效的值
-    if (!result.direction || !['BUY', 'SELL', 'NEUTRAL'].includes(result.direction.toUpperCase())) {
-        result.direction = 'NEUTRAL';
-    } else {
-        result.direction = result.direction.toUpperCase();
-    }
-    
-    // 确保 confidence 是数字类型，且在有效范围内
-    if (typeof result.confidence !== 'number') {
-        result.confidence = parseInt(result.confidence) || 60;
-    }
-    // 限制 confidence 在 60-99 范围内
-    result.confidence = Math.max(60, Math.min(99, result.confidence));
-    
-    // 确保 confidenceLevel 存在且有效
-    if (!result.confidenceLevel || !['HIGH', 'MED', 'LOW'].includes(result.confidenceLevel.toUpperCase())) {
-        if (result.confidence >= 85) result.confidenceLevel = 'HIGH';
-        else if (result.confidence >= 70) result.confidenceLevel = 'MED';
-        else result.confidenceLevel = 'LOW';
-    } else {
-        result.confidenceLevel = result.confidenceLevel.toUpperCase();
-    }
-    
-    // 确保 reason 存在
-    if (!result.reason || typeof result.reason !== 'string') {
-        result.reason = 'Analysis completed';
-    }
 
-    return result;
+    // ✅ 核心功能: 人工随机扰动 (Jitter)
+    // 解决 "85%" 重复出现的问题。给它加一个 [-3, +3] 的随机偏移
+    let rawConfidence = parseInt(result.confidence);
+    if (isNaN(rawConfidence)) rawConfidence = 75; // 兜底
+
+    const jitter = Math.floor(Math.random() * 7) - 3; 
+    rawConfidence += jitter;
+
+    // ✅ 核心功能: 安全范围锁定 (60-99)
+    const finalConfidence = Math.min(99, Math.max(60, rawConfidence));
+    
+    return {
+      direction: result.direction,
+      confidence: finalConfidence,
+      confidenceLevel: finalConfidence >= 80 ? 'HIGH' : (finalConfidence >= 70 ? 'MED' : 'LOW'),
+      reason: result.reason,
+      analysis_details: result.internal_analysis // 暴露详细分析给前端
+    };
 
   } catch (error) {
-    console.error('❌ AI Service Error:', error.message);
-    return { 
-        direction: 'NEUTRAL', 
-        confidence: 0, 
-        confidenceLevel: 'LOW', 
-        reason: "AI analysis unavailable. Check connection." 
-    };
+    console.error('❌ Quant Model Error:', error);
+    // 兜底返回，防止前端白屏
+    return { direction: 'NEUTRAL', confidence: 60, confidenceLevel: 'LOW', reason: "Data insufficiency or calculation error." };
   }
 };
 

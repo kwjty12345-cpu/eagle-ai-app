@@ -2,3 +2,7 @@ node_modules
 .env
 dist
 .DS_Store
+# 忽略 Puppeteer 的缓存文件夹
+.puppeteer-profile/
+backend/.puppeteer-profile/
+**/.puppeteer-profile/
