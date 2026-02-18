@@ -1,5 +1,4 @@
-import React, { useState } from 'react';
-
+import React, { useState, useEffect } from 'react';
 // 🟢 模式 A: 本地开发
 //const API_BASE = "http://localhost:5000";
 
@@ -78,6 +77,32 @@ const NewsCard = ({ eventGroup, userTier, onUnlock }) => {
    
   const finalPrediction = prediction || existingPrediction;
 
+  // 👇 --- 新增：卡片专属倒计时逻辑 --- 👇
+  const [timeLeft, setTimeLeft] = useState(null);
+
+  useEffect(() => {
+    if (!mainEvent.date) return;
+    
+    const eventTimeMs = new Date(mainEvent.date).getTime();
+    
+    const timer = setInterval(() => {
+      const nowMs = new Date().getTime();
+      const diff = eventTimeMs - nowMs;
+
+      // 判断是否在 10 分钟内 (600,000 毫秒) 且还未发生
+      if (diff > 0 && diff <= 600000) {
+        const m = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const s = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft(`${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`);
+      } else {
+        setTimeLeft(null); // 不在 10 分钟内或者已经发生，就不显示倒数
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [mainEvent.date]);
+  // 👆 --- 新增结束 --- 👆
+
   // --- AI 分析逻辑 ---
   const handleAnalyze = async () => {
     setLoading(true);
@@ -130,9 +155,23 @@ const NewsCard = ({ eventGroup, userTier, onUnlock }) => {
             <span className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider ${isFuture ? 'bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/20' : 'bg-slate-800 text-slate-500'}`}>{isFuture ? 'FUTURE' : 'PAST'}</span>
             <span className={`px-3 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${isFuture ? 'bg-red-500/10 text-red-400 border-red-500/20' : 'bg-gray-800 text-gray-600 border-gray-700'}`}>{mainEvent.impact}</span>
           </div>
-          <div className="text-slate-400 text-xs font-mono font-medium">
-              <span className={isFuture ? "text-white" : "text-gray-500"}>{formatEventDate(mainEvent.date)}</span>
+          
+          {/* 👇 修改区域：时间显示区域 👇 */}
+          <div className="text-right">
+             {timeLeft ? (
+                // 显示倒数
+                <span className="text-red-500 font-mono font-black text-lg animate-pulse tracking-widest drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]">
+                  {timeLeft}
+                </span>
+             ) : (
+                // 显示原本的时间文字
+                <span className={`text-xs font-mono font-medium ${isFuture ? "text-white" : "text-gray-500"}`}>
+                  {formatEventDate(mainEvent.date)}
+                </span>
+             )}
           </div>
+          {/* 👆 修改区域结束 👆 */}
+
         </div>
 
         {/* --- List of Events (Looping) --- */}

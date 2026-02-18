@@ -20,27 +20,18 @@ const scrapeForexFactory = async () => {
 
   let browser;
   try {
-    // ✅ 修复：浏览器启动配置大改
+    // 浏览器启动配置
     browser = await puppeteer.launch({
-      // 👇👇👇【关键新增】👇👇👇
-      // 优先使用 Dockerfile 里定义的环境变量路径，本地开发则自动寻找默认路径
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
-      // 👆👆👆【关键新增】👆👆👆
-
       headless: 'new', 
-      
       args: [
         '--no-sandbox', 
         '--disable-setuid-sandbox', 
         '--disable-blink-features=AutomationControlled',
-        
-        // 风险解决 2：解决 Linux/Docker 环境下内存不足导致的崩溃
         '--disable-dev-shm-usage', 
-        
-        // 可选优化：减少服务器资源占用
         '--no-first-run',
         '--no-zygote',
-        '--disable-gpu', // 建议加上这个，服务器通常没有显卡
+        '--disable-gpu', 
       ],
       defaultViewport: { width: 1920, height: 1080 }
     });
@@ -53,7 +44,7 @@ const scrapeForexFactory = async () => {
         if (text.startsWith('DEBUG:')) console.log(text);
     });
 
-    // 2. 注入 Filter Cookie (代码保持不变)
+    // 2. 注入 Filter Cookie
     const filterConfig = encodeURIComponent(JSON.stringify({
       impacts: ["3"], 
       currencies: ["USD"], 
@@ -68,7 +59,6 @@ const scrapeForexFactory = async () => {
       expires: Math.floor(Date.now() / 1000) + 31536000
     });
 
-    // ✅ 优化：为页面请求添加 User-Agent
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
     const weeks = ['this', 'last'];
@@ -80,7 +70,16 @@ const scrapeForexFactory = async () => {
         waitUntil: 'networkidle2', timeout: 60000
       });
 
-      // ... 滚动逻辑 ... 
+      // ✅ 修改部分 1：增加表格加载等待，防止网络慢或被 Cloudflare 拦截导致抓取空数据
+      try {
+          console.log('⏳ 等待日历表格加载...');
+          // 等待日历主表格出现，最多等 15 秒
+          await page.waitForSelector('.calendar__table', { timeout: 15000 });
+      } catch (e) {
+          console.log(`⚠️ [${week}] 找不到日历表格！可能被反爬虫拦截或加载超时。跳过本周。`);
+          continue; // 直接跳过本周的数据抓取，不让程序崩溃
+      }
+
       console.log('🖱️ 正在自动滚动页面...');
       await page.evaluate(async () => {
           await new Promise((resolve) => {
@@ -99,45 +98,47 @@ const scrapeForexFactory = async () => {
       });
       await new Promise(r => setTimeout(r, 1000));
 
-      // ... 抓取逻辑保持不变 ...
+      // ✅ 修改部分 2：更新 DOM 选择器，兼容多种类名写法
       const rawEvents = await page.evaluate(() => {
         const data = [];
-        const rows = document.querySelectorAll('tr.calendar__row'); 
+        // 兼容带双下划线和单下划线/无下划线的行写法
+        const rows = document.querySelectorAll('tr.calendar__row, tr.calendar_row'); 
         let memDate = ""; 
         let memTime = ""; 
         
-        rows.forEach((row, index) => {
-             const getText = (s) => { const el = row.querySelector(s); return el ? el.textContent.trim() : ""; };
-             let rawDate = getText('.calendar__date');
-             let rawTime = getText('.calendar__time');
-             let rawCurrency = getText('.calendar__currency');
-             const title = getText('.calendar__event-title');
+        rows.forEach((row) => {
+             // 优化获取文本的函数，自动清理多余的换行符和空格
+             const getText = (s) => { 
+                 const el = row.querySelector(s); 
+                 return el ? el.textContent.replace(/\s+/g, ' ').trim() : ""; 
+             };
+
+             // 增加备用选择器
+             let rawDate = getText('td.calendar__date, td.date');
+             let rawTime = getText('td.calendar__time, td.time');
+             let rawCurrency = getText('td.calendar__currency, td.currency');
+             const title = getText('td.calendar__event span, td.event span, td.calendar__event, td.event');
              
              if (rawDate && rawDate.length > 1) memDate = rawDate;
              if (rawTime && rawTime.length > 1) memTime = rawTime;
-             if (!title) return; 
+             
+             if (!title) return; // 如果没有标题，跳过该行
 
-             const impactEl = row.querySelector('.calendar__impact .icon');
-             const iconClass = impactEl ? impactEl.className : "";
-             const isRed = iconClass.includes('impact-red') || iconClass.includes('high') || iconClass.includes('impact-3');
+             // 优化 Impact (影响力) 的判断逻辑
+             const impactEl = row.querySelector('td.calendar__impact span, td.impact span, .calendar__impact .icon');
+             const iconClass = impactEl ? impactEl.className.toLowerCase() : "";
+             const isRed = iconClass.includes('red') || iconClass.includes('high') || iconClass.includes('impact-3');
 
-             if (rawCurrency === 'USD') {
-                 if (isRed) {
-                     data.push({
-                         title, currency: 'USD', impact: 'High', 
-                         rawDate: memDate, rawTime: memTime, 
-                         forecast: getText('.calendar__forecast'), 
-                         actual: getText('.calendar__actual'), 
-                         previous: getText('.calendar__previous')
-                     });
-                 }
-             } else if (rawCurrency === '' && isRed) {
+             if ((rawCurrency === 'USD' && isRed) || (rawCurrency === '' && isRed)) {
                  data.push({
-                     title, currency: 'USD', impact: 'High', 
-                     rawDate: memDate, rawTime: memTime, 
-                     forecast: getText('.calendar__forecast'), 
-                     actual: getText('.calendar__actual'), 
-                     previous: getText('.calendar__previous')
+                     title, 
+                     currency: 'USD', 
+                     impact: 'High', 
+                     rawDate: memDate, 
+                     rawTime: memTime, 
+                     forecast: getText('td.calendar__forecast, td.forecast'), 
+                     actual: getText('td.calendar__actual, td.actual'), 
+                     previous: getText('td.calendar__previous, td.previous')
                  });
              }
         });
@@ -146,7 +147,7 @@ const scrapeForexFactory = async () => {
 
       console.log(`📊 [${week}] 抓取结果: ${rawEvents.length} 条`);
 
-      // ... 入库逻辑保持不变 ...
+      // 3. 数据库入库逻辑保持不变
       let savedCount = 0;
       for (const event of rawEvents) {
         if (!event.rawTime || event.rawTime.toLowerCase().includes('day')) continue;

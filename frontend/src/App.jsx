@@ -9,7 +9,7 @@ import NewsCard from './components/NewsCard';
 import CalendarWidget from './components/CalendarWidget'; 
 import PaymentModal from './components/PaymentModal';
 import DisclaimerModal from './components/DisclaimerModal';
-
+import { useNewsCountdown } from './hooks/useNewsCountdown';
 // 🟢 模式 A: 本地开发
 //const API_BASE = "http://localhost:5000";
 
@@ -165,6 +165,10 @@ function App() {
     .filter(group => group.time <= now)
     .sort((a, b) => b.time - a.time);
 
+  // 👇 添加这一行：提取即将发生的新闻并传入倒计时 Hook
+  const upcomingEventsForCountdown = futureGroups.flatMap(group => group.events);
+  const { currentTime, marketStatus } = useNewsCountdown(upcomingEventsForCountdown);
+
   // 👇 5. 处理登出逻辑
   const handleLogout = async () => {
     await signOut(auth);
@@ -278,9 +282,36 @@ function App() {
 
         <div className="hidden lg:block lg:col-span-1">
           <CalendarWidget events={allNews} />
-          <div className="mt-8 p-6 rounded-2xl border border-white/5 bg-white/5 text-center">
-             <h3 className="text-gray-400 text-[10px] font-bold uppercase tracking-widest mb-2">Market Status</h3>
-             <p className="text-green-400 text-xs font-bold uppercase animate-pulse">● Live Data Feed Active</p>
+          
+          {/* 👇 全新的 MARKET STATUS (实时世界时钟) */}
+          <div className="mt-8 p-6 rounded-2xl border border-white/5 bg-[#121624] text-center relative overflow-hidden shadow-lg">
+             
+             {/* 如果有新闻来临，背景淡淡闪红光 */}
+             {marketStatus.isAlert && (
+                <div className="absolute inset-0 bg-red-500/5 animate-pulse"></div>
+             )}
+
+             <h3 className="text-gray-500 text-[10px] font-bold uppercase tracking-widest mb-4 flex items-center justify-center gap-2 relative z-10">
+               <span className={`w-2 h-2 rounded-full ${marketStatus.dotColor}`}></span>
+               Market Status
+             </h3>
+
+             <div className="relative z-10">
+               {/* 实时电子时钟 */}
+               <div className="text-4xl font-black font-mono tracking-tight text-white mb-2">
+                 {currentTime.toLocaleTimeString('en-US', { 
+                   hour12: false, 
+                   hour: '2-digit', 
+                   minute: '2-digit', 
+                   second: '2-digit' 
+                 })}
+               </div>
+               
+               {/* 底部状态条 */}
+               <div className={`${marketStatus.color} text-[10px] font-bold uppercase tracking-widest bg-white/5 py-1.5 px-3 rounded-full inline-block mt-2`}>
+                 {marketStatus.text}
+               </div>
+             </div>
           </div>
         </div>
 
